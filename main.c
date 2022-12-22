@@ -44,6 +44,22 @@ uint8_t mcp2515_read(uint8_t addr) {
     return rx[2];
 }
 
+void mcp2515_isr(uint gpio, uint32_t event_mask) {
+    volatile uint8_t canstat = mcp2515_read(0x0e);
+    uint8_t isr = (canstat >> 1) & 0b111;
+
+    if(isr == 0b110) {
+        uint8_t tx[14] = {
+            0b10010000
+        };
+        uint8_t rx[14] = {0};
+
+        spi_transmit(tx, rx, sizeof(tx));
+
+        printf("rx %d\n", rx[5] & 0b1111);
+    }
+}
+
 int main() {
     stdio_init_all();
 
@@ -55,6 +71,10 @@ int main() {
     gpio_init(PICO_DEFAULT_SPI_CSN_PIN);
     gpio_set_dir(PICO_DEFAULT_SPI_CSN_PIN, GPIO_OUT);
 
+
+    // GP20
+    gpio_init(20);
+    gpio_set_irq_enabled_with_callback(20, GPIO_IRQ_LEVEL_LOW, true, mcp2515_isr);
 
 
     mcp2515_reset();
@@ -70,6 +90,9 @@ int main() {
     //mcp2515_write(0x28, 0x82);
     uint8_t tx[] = {0x05, 0x28, 0x07, 0x01};
     spi_transmit(tx, NULL, sizeof(tx));
+
+    // interrupt on rxs
+    mcp2515_write(0x2B, 3);
 
     mcp2515_write(0x0F, 0x07 | (1 << 3));
       
