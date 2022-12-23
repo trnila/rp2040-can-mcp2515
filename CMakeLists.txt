@@ -8,8 +8,10 @@ pico_sdk_init()
 
 add_executable(rp2040-can-mcp2515
   main.c
+  usb_descriptors.c
 )
 pico_enable_stdio_usb(rp2040-can-mcp2515 1)
 pico_enable_stdio_uart(rp2040-can-mcp2515 0)
 pico_add_extra_outputs(rp2040-can-mcp2515)
-target_link_libraries(rp2040-can-mcp2515 pico_stdlib hardware_spi)
+target_include_directories(rp2040-can-mcp2515 PRIVATE .)
+target_link_libraries(rp2040-can-mcp2515 pico_stdlib hardware_spi tinyusb_device tinyusb_board)

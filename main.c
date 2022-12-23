@@ -1,6 +1,40 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
+#include "tusb.h"
 
+struct gs_device_config {
+	uint8_t reserved1;
+	uint8_t reserved2;
+	uint8_t reserved3;
+	uint8_t icount;
+	uint32_t sw_version;
+	uint32_t hw_version;
+} __attribute__((packed));
+
+struct gs_device_bt_const {
+	uint32_t feature;
+	uint32_t fclk_can;
+	uint32_t tseg1_min;
+	uint32_t tseg1_max;
+	uint32_t tseg2_min;
+	uint32_t tseg2_max;
+	uint32_t sjw_max;
+	uint32_t brp_min;
+	uint32_t brp_max;
+	uint32_t brp_inc;
+} __attribute__((packed));
+
+struct gs_host_frame {
+	uint32_t echo_id;
+	uint32_t can_id;
+
+	uint8_t can_dlc;
+	uint8_t channel;
+	uint8_t flags;
+	uint8_t reserved;
+
+	uint8_t data[8];
+} __attribute__((packed));
 
 const uint LED_PIN = 25;
 
@@ -44,6 +78,7 @@ uint8_t mcp2515_read(uint8_t addr) {
     return rx[2];
 }
 
+struct gs_host_frame rxf;
 void mcp2515_isr(uint gpio, uint32_t event_mask) {
     volatile uint8_t canstat = mcp2515_read(0x0e);
     uint8_t isr = (canstat >> 1) & 0b111;
@@ -57,10 +92,22 @@ void mcp2515_isr(uint gpio, uint32_t event_mask) {
         spi_transmit(tx, rx, sizeof(tx));
 
         printf("rx %d\n", rx[5] & 0b1111);
+
+        rxf.echo_id = -1;
+        rxf.can_dlc = rx[5] & 0b1111;
+        rxf.flags = 0;
+        rxf.channel = 0;
+        rxf.can_id = (rx[1] << 3) | (rx[2] >> 5);
+        memcpy(rxf.data, &rx[6], rxf.can_dlc);
+
+        tud_vendor_write(&rxf, sizeof(rxf));
     }
 }
 
 int main() {
+    //board_init();
+    tusb_init();
+
     stdio_init_all();
 
     spi_init(spi_default, 1000 * 1000);
@@ -101,6 +148,32 @@ int main() {
     gpio_set_dir(LED_PIN, GPIO_OUT);
 
     for(;;) {
+        tud_task();
+        if ( tud_vendor_available() ) {
+            uint8_t buf[64];
+            uint32_t count = tud_vendor_read(buf, sizeof(buf));
+
+            struct gs_host_frame *frame = buf;
+
+            uint8_t tx[24];
+            tx[0] = 0b01000000;
+            tx[1] = 0xFF; //SIDH
+            tx[2] = 0x00; //SIDL
+            tx[3] = 0x00; //EID8
+            tx[4] = 0x00; // IED0
+            tx[5] = frame->can_dlc; // DLC
+            memcpy(&tx[6], frame->data, frame->can_dlc);
+
+            spi_transmit(tx, NULL, 6 + frame->can_dlc);
+
+            tx[0] = 0b10000001;
+            spi_transmit(tx, NULL, 1);
+
+            tud_vendor_write(buf, count);
+        }
+    }
+
+    for(;;) {
         volatile uint8_t status = mcp2515_read(0x0F);
 
 
@@ -125,4 +198,38 @@ int main() {
         puts("Hello World\n");
         sleep_ms(1000);
     }
+}
+
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request) {
+    // nothing to with DATA & ACK stage
+    if (stage != CONTROL_STAGE_SETUP) return true;
+
+    if(request->bmRequestType_bit.type == TUSB_REQ_TYPE_VENDOR) {
+        if(request->bRequest == 0 || request->bRequest == 1 || request->bRequest == 2) {
+            return tud_control_xfer(rhport, request, request, request->wLength);
+        } else if(request->bRequest == 5) {
+            struct gs_device_config res;
+            res.icount = 0;
+            res.sw_version = 18;
+            res.hw_version = 11;
+            return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
+        } else if(request->bRequest == 4) {
+            struct gs_device_bt_const res = {
+                0,
+                8000000, // can timing base clock
+                1, // tseg1 min
+                16, // tseg1 max
+                1, // tseg2 min
+                8, // tseg2 max
+                4, // sjw max
+                1, // brp min
+                1024, //brp_max
+                1, // brp increment;
+            };
+            return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
+        }
+    }
+
+    for(;;);
+    return false;
 }
