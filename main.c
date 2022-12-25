@@ -1,3 +1,4 @@
+#include <assert.h>
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "tusb.h"
@@ -36,9 +37,12 @@ struct gs_host_frame {
 	uint8_t data[8];
 } __attribute__((packed));
 
+#define MCP2515_TX_BUFS 3
+
 const static uint16_t MCP2515_CMD_RESET = 0b11000000;
 const static uint16_t MCP2515_CMD_WRITE = 0b00000010;
 const static uint16_t MCP2515_CMD_READ  = 0b00000011;
+const static uint16_t MCP2515_CMD_BIT_MODIFY = 0b00000101;
 inline static uint16_t MCP2515_CMD_READ_RX_BUFFER(size_t n) {
     return  0b10010000 | ((n & 1) << 1);
 }
@@ -49,6 +53,7 @@ const static uint16_t MCP2515_CNF3 = 0x28;
 const static uint16_t MCP2515_CNF2 = 0x29;
 const static uint16_t MCP2515_CNF1 = 0x2A;
 const static uint16_t MCP2515_CANINTE = 0x2B;
+const static uint16_t MCP2515_CANINTF = 0x2C;
 const static uint16_t MCP2515_RXB0CTRL = 0x60;
 
 // Rollover enable bit (use RX1 if RX0 is full)
@@ -56,7 +61,8 @@ const static uint8_t MCP2515_RXB0CTRL_BUKT = 1 << 2;
 
 const static uint MCP2515_IRQ_GPIO = 20;
 
-volatile bool rx_pending = false;
+volatile bool mcp2515_isr_pending = false;
+volatile struct gs_host_frame tx[MCP2515_TX_BUFS];
 
 void spi_transmit(uint8_t *tx, uint8_t* rx, size_t len) {
     asm volatile("nop \n nop \n nop");
@@ -97,18 +103,37 @@ uint8_t mcp2515_read(uint8_t addr) {
     return rx[2];
 }
 
+void mcp2515_bit_modify(uint8_t reg, uint8_t mask, uint8_t val) {
+    uint8_t tx[] = {MCP2515_CMD_BIT_MODIFY, reg, mask, val};
+    spi_transmit(tx, NULL, sizeof(tx));
+}
+
 uint8_t mcp2515_canstat_to_irqs(uint8_t canstat) {
     return (canstat >> 1) & 0b111;
 }
 
 void mcp2515_isr(uint gpio, uint32_t event_mask) {
-    rx_pending = true;
+    mcp2515_isr_pending = true;
+}
+
+ssize_t mcp2515_get_free_tx() {
+    for(size_t i = 0; i < sizeof(tx) / sizeof(*tx); i++) {
+        if(tx[i].echo_id == -1) {
+            return i;
+        }
+    }
+
+    return -1;
 }
 
 int main() {
     tusb_init();
 
     stdio_init_all();
+
+    for(size_t i = 0; i < sizeof(tx) / sizeof(*tx); i++) {
+        tx[i].echo_id = -1;
+    }
 
     spi_init(spi_default, 1000 * 1000);
     gpio_set_function(PICO_DEFAULT_SPI_RX_PIN, GPIO_FUNC_SPI);
@@ -118,7 +143,7 @@ int main() {
     gpio_set_dir(PICO_DEFAULT_SPI_CSN_PIN, GPIO_OUT);
 
     gpio_init(MCP2515_IRQ_GPIO);
-    gpio_set_irq_enabled_with_callback(MCP2515_IRQ_GPIO, GPIO_IRQ_LEVEL_LOW, true, mcp2515_isr);
+    gpio_set_irq_enabled_with_callback(MCP2515_IRQ_GPIO, GPIO_IRQ_EDGE_FALL, true, mcp2515_isr);
 
     mcp2515_reset();
     sleep_ms(250);
@@ -126,11 +151,11 @@ int main() {
     mcp2515_write(MCP2515_CNF1, 0x01);
     mcp2515_write(MCP2515_CNF2, 0xb5);
     //mcp2515_write(0x28, 0x82);
-    uint8_t tx[] = {0x05, MCP2515_CNF3, 0x07, 0x01};
-    spi_transmit(tx, NULL, sizeof(tx));
+    uint8_t txd[] = {0x05, MCP2515_CNF3, 0x07, 0x01};
+    spi_transmit(txd, NULL, sizeof(txd));
 
-    // enable interrupts on rxs
-    mcp2515_write(MCP2515_CANINTE, 3);
+    // enable interrupts on rxs and txs
+    mcp2515_write(MCP2515_CANINTE, 0b11111);
 
     // use RX1 if RX0 is full
     mcp2515_write(MCP2515_RXB0CTRL, MCP2515_RXB0CTRL_BUKT);
@@ -139,8 +164,8 @@ int main() {
     mcp2515_write(MCP2515_CANCTRL, 0x07 | (1 << 3));
       
     for(;;) {
-        if(rx_pending) {
-            rx_pending = false;
+        if(mcp2515_isr_pending) {
+            mcp2515_isr_pending = false;
             struct gs_host_frame rxf;
             uint8_t irqs = mcp2515_canstat_to_irqs(mcp2515_read(MCP2515_CANSTAT));
 
@@ -165,6 +190,18 @@ int main() {
                     memcpy(rxf.data, &rx[6], rxf.can_dlc);
 
                     tud_vendor_write(&rxf, sizeof(rxf));
+                } else if(irqs >= 0b011 && irqs <= 0b101) {
+                    size_t txn = irqs - 0b011;
+                    assert(txn >= 0 && txn < MCP2515_TX_BUFS);
+                    assert(tx[txn].echo_id != -1);
+
+                    tud_vendor_write(&tx[txn], sizeof(tx[txn]));
+                    tx[txn].echo_id = -1;
+
+                    // ack irq
+                    mcp2515_bit_modify(MCP2515_CANINTF, 1 << (2 + txn), 0);
+
+                    irqs = mcp2515_canstat_to_irqs(mcp2515_read(MCP2515_CANSTAT));
                 } else {
                     for(;;);
                 }
@@ -172,27 +209,33 @@ int main() {
         }
         
         tud_task();
+
+
         if ( tud_vendor_available() ) {
-            uint8_t buf[64];
-            uint32_t count = tud_vendor_read(buf, sizeof(buf));
+            ssize_t txn = mcp2515_get_free_tx();
+            if(txn >= 0) {
+                struct gs_host_frame *frame = &tx[txn];
+                uint32_t count = tud_vendor_read(frame, sizeof(*frame));
+                if(count != sizeof(*frame)) {
+                    for(;;);
+                }
 
-            struct gs_host_frame *frame = buf;
+                size_t hdr_size = 6;
+                uint8_t tx[hdr_size + sizeof(frame->data)];
+                tx[0] = 0b01000000 | (txn == 0 ? 0 : (1 << txn));
+                tx[1] = 0xFF; //SIDH
+                tx[2] = 0x00; //SIDL
+                tx[3] = 0x00; //EID8
+                tx[4] = 0x00; // IED0
+                tx[5] = frame->can_dlc; // DLC
+                memcpy(&tx[6], frame->data, frame->can_dlc);
 
-            uint8_t tx[24];
-            tx[0] = 0b01000000;
-            tx[1] = 0xFF; //SIDH
-            tx[2] = 0x00; //SIDL
-            tx[3] = 0x00; //EID8
-            tx[4] = 0x00; // IED0
-            tx[5] = frame->can_dlc; // DLC
-            memcpy(&tx[6], frame->data, frame->can_dlc);
+                spi_transmit(tx, NULL, hdr_size + frame->can_dlc);
 
-            spi_transmit(tx, NULL, 6 + frame->can_dlc);
-
-            tx[0] = 0b10000001;
-            spi_transmit(tx, NULL, 1);
-
-            tud_vendor_write(buf, count);
+                // request to send
+                tx[0] = 0b10000000U | (1U << txn);
+                spi_transmit(tx, NULL, 1);
+            }
         }
     }
 }
