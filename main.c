@@ -39,6 +39,9 @@ struct gs_host_frame {
 const static uint16_t MCP2515_CMD_RESET = 0b11000000;
 const static uint16_t MCP2515_CMD_WRITE = 0b00000010;
 const static uint16_t MCP2515_CMD_READ  = 0b00000011;
+inline static uint16_t MCP2515_CMD_READ_RX_BUFFER(size_t n) {
+    return  0b10010000 | ((n & 1) << 1);
+}
 
 const static uint16_t MCP2515_CANSTAT = 0x0E;
 const static uint16_t MCP2515_CANCTRL = 0x0F;
@@ -46,6 +49,10 @@ const static uint16_t MCP2515_CNF3 = 0x28;
 const static uint16_t MCP2515_CNF2 = 0x29;
 const static uint16_t MCP2515_CNF1 = 0x2A;
 const static uint16_t MCP2515_CANINTE = 0x2B;
+const static uint16_t MCP2515_RXB0CTRL = 0x60;
+
+// Rollover enable bit (use RX1 if RX0 is full)
+const static uint8_t MCP2515_RXB0CTRL_BUKT = 1 << 2;
 
 const static uint MCP2515_IRQ_GPIO = 20;
 
@@ -90,6 +97,10 @@ uint8_t mcp2515_read(uint8_t addr) {
     return rx[2];
 }
 
+uint8_t mcp2515_canstat_to_irqs(uint8_t canstat) {
+    return (canstat >> 1) & 0b111;
+}
+
 void mcp2515_isr(uint gpio, uint32_t event_mask) {
     rx_pending = true;
 }
@@ -121,6 +132,9 @@ int main() {
     // enable interrupts on rxs
     mcp2515_write(MCP2515_CANINTE, 3);
 
+    // use RX1 if RX0 is full
+    mcp2515_write(MCP2515_RXB0CTRL, MCP2515_RXB0CTRL_BUKT);
+
     // transition from config to normal mode
     mcp2515_write(MCP2515_CANCTRL, 0x07 | (1 << 3));
       
@@ -128,27 +142,32 @@ int main() {
         if(rx_pending) {
             rx_pending = false;
             struct gs_host_frame rxf;
-            volatile uint8_t canstat = mcp2515_read(MCP2515_CANSTAT);
-            uint8_t isr = (canstat >> 1) & 0b111;
+            uint8_t irqs = mcp2515_canstat_to_irqs(mcp2515_read(MCP2515_CANSTAT));
 
-            if(isr == 0b110) {
-                uint8_t tx[14] = {
-                    0b10010000
-                };
-                uint8_t rx[14] = {0};
+            while(irqs) {
+                if((irqs & 0b110) == 0b110) {
+                    uint8_t rxn = irqs & 0b001;
+                    // read RXBnSIDH ... RXBnD0 ... RXBnD7 CANSTAT
+                    // and automatically clear pending RX
+                    uint8_t tx[15] = {
+                        MCP2515_CMD_READ_RX_BUFFER(rxn),
+                    };
+                    uint8_t rx[sizeof(tx)] = {0};
+                    spi_transmit(tx, rx, sizeof(tx));
+                    // update CANSTAT
+                    irqs = mcp2515_canstat_to_irqs(rx[14]);
 
-                spi_transmit(tx, rx, sizeof(tx));
+                    rxf.echo_id = -1;
+                    rxf.can_dlc = rx[5] & 0b1111;
+                    rxf.flags = 0;
+                    rxf.channel = 0;
+                    rxf.can_id = (rx[1] << 3) | (rx[2] >> 5);
+                    memcpy(rxf.data, &rx[6], rxf.can_dlc);
 
-                printf("rx %d\n", rx[5] & 0b1111);
-
-                rxf.echo_id = -1;
-                rxf.can_dlc = rx[5] & 0b1111;
-                rxf.flags = 0;
-                rxf.channel = 0;
-                rxf.can_id = (rx[1] << 3) | (rx[2] >> 5);
-                memcpy(rxf.data, &rx[6], rxf.can_dlc);
-
-                tud_vendor_write(&rxf, sizeof(rxf));
+                    tud_vendor_write(&rxf, sizeof(rxf));
+                } else {
+                    for(;;);
+                }
             }
         }
         
