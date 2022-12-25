@@ -3,6 +3,25 @@
 #include "hardware/spi.h"
 #include "tusb.h"
 
+enum gs_usb_breq {
+	GS_USB_BREQ_HOST_FORMAT = 0,
+	GS_USB_BREQ_BITTIMING,
+	GS_USB_BREQ_MODE,
+	GS_USB_BREQ_BERR,
+	GS_USB_BREQ_BT_CONST,
+	GS_USB_BREQ_DEVICE_CONFIG,
+	GS_USB_BREQ_TIMESTAMP,
+	GS_USB_BREQ_IDENTIFY,
+	GS_USB_BREQ_GET_USER_ID,
+	GS_USB_BREQ_QUIRK_CANTACT_PRO_DATA_BITTIMING = GS_USB_BREQ_GET_USER_ID,
+	GS_USB_BREQ_SET_USER_ID,
+	GS_USB_BREQ_DATA_BITTIMING,
+	GS_USB_BREQ_BT_CONST_EXT,
+	GS_USB_BREQ_SET_TERMINATION,
+	GS_USB_BREQ_GET_TERMINATION,
+	GS_USB_BREQ_GET_STATE,
+};
+
 struct gs_device_config {
 	uint8_t reserved1;
 	uint8_t reserved2;
@@ -37,6 +56,25 @@ struct gs_host_frame {
 	uint8_t data[8];
 } __attribute__((packed));
 
+struct gs_device_bittiming {
+	uint32_t prop_seg;
+	uint32_t phase_seg1;
+	uint32_t phase_seg2;
+	uint32_t sjw;
+	uint32_t brp;
+} __attribute__((packed));
+
+struct gs_device_mode {
+	uint32_t mode;
+	uint32_t flags;
+} __attribute__((packed));
+
+struct usb_control_out_t {
+    uint8_t bRequest;
+    void *buffer;
+    uint16_t wLength;
+};
+
 #define MCP2515_TX_BUFS 3
 
 const static uint16_t MCP2515_CMD_RESET = 0b11000000;
@@ -63,6 +101,15 @@ const static uint MCP2515_IRQ_GPIO = 20;
 
 volatile bool mcp2515_isr_pending = false;
 volatile struct gs_host_frame tx[MCP2515_TX_BUFS];
+
+static uint32_t byte_order = 0;
+static struct gs_device_bittiming device_bittiming;
+static struct gs_device_mode device_mode;
+struct usb_control_out_t usb_control_out[] = {
+    {GS_USB_BREQ_HOST_FORMAT, &byte_order, sizeof(byte_order)},
+    {GS_USB_BREQ_BITTIMING, &device_bittiming, sizeof(device_bittiming)},
+    {GS_USB_BREQ_MODE, &device_mode, sizeof(device_mode)},
+};
 
 void spi_transmit(uint8_t *tx, uint8_t* rx, size_t len) {
     asm volatile("nop \n nop \n nop");
@@ -150,9 +197,7 @@ int main() {
 
     mcp2515_write(MCP2515_CNF1, 0x01);
     mcp2515_write(MCP2515_CNF2, 0xb5);
-    //mcp2515_write(0x28, 0x82);
-    uint8_t txd[] = {0x05, MCP2515_CNF3, 0x07, 0x01};
-    spi_transmit(txd, NULL, sizeof(txd));
+    mcp2515_write(MCP2515_CNF3, 0x01);
 
     // enable interrupts on rxs and txs
     mcp2515_write(MCP2515_CANINTE, 0b11111);
@@ -240,36 +285,68 @@ int main() {
     }
 }
 
-bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request) {
-    // nothing to with DATA & ACK stage
-    if (stage != CONTROL_STAGE_SETUP) return true;
+bool usb_handle_control_out(uint8_t req) {
+    if(req == GS_USB_BREQ_HOST_FORMAT) {
+        return byte_order == 0xbeef;
+    } else if(req == GS_USB_BREQ_MODE) {
+        return true;
+    } else if(req == GS_USB_BREQ_BITTIMING) {
+        return true;
+    }
+    return false;
+}
 
-    if(request->bmRequestType_bit.type == TUSB_REQ_TYPE_VENDOR) {
-        if(request->bRequest == 0 || request->bRequest == 1 || request->bRequest == 2) {
-            return tud_control_xfer(rhport, request, request, request->wLength);
-        } else if(request->bRequest == 5) {
-            struct gs_device_config res;
-            res.icount = 0;
-            res.sw_version = 18;
-            res.hw_version = 11;
-            return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
-        } else if(request->bRequest == 4) {
-            struct gs_device_bt_const res = {
-                0,
-                8000000, // can timing base clock
-                1, // tseg1 min
-                16, // tseg1 max
-                1, // tseg2 min
-                8, // tseg2 max
-                4, // sjw max
-                1, // brp min
-                1024, //brp_max
-                1, // brp increment;
-            };
-            return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
+
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, const tusb_control_request_t* request) {
+    if(request->bmRequestType_bit.type != TUSB_REQ_TYPE_VENDOR || request->wIndex != 0) {
+        return false;
+    }
+
+    if(request->bmRequestType_bit.direction == TUSB_DIR_OUT) {
+        for(size_t i = 0; i < sizeof(usb_control_out) / sizeof(*usb_control_out); i++) {
+            if(usb_control_out[i].bRequest == request->bRequest) {
+                if(stage == CONTROL_STAGE_SETUP) {
+                    if(usb_control_out[i].wLength == request->wLength) {
+                        return tud_control_xfer(rhport, request, usb_control_out[i].buffer, usb_control_out[i].wLength);
+                    }
+                } else if(stage == CONTROL_STAGE_DATA) {
+                    return usb_handle_control_out(request->bRequest);
+                } else if(stage == CONTROL_STAGE_ACK) {
+                    return true;
+                }
+            }
+        }
+    } else if(request->bmRequestType_bit.direction == TUSB_DIR_IN) {
+        if(request->bRequest == GS_USB_BREQ_DEVICE_CONFIG) {
+            if(stage == CONTROL_STAGE_SETUP) {
+                struct gs_device_config res;
+                res.icount = 0;
+                res.sw_version = 18;
+                res.hw_version = 11;
+                return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
+            } else {
+                return true;
+            }
+        } else if(request->bRequest == GS_USB_BREQ_BT_CONST) {
+            if(stage == CONTROL_STAGE_SETUP) {
+                struct gs_device_bt_const res = {
+                    0,
+                    8000000, // can timing base clock
+                    1, // tseg1 min
+                    16, // tseg1 max
+                    1, // tseg2 min
+                    8, // tseg2 max
+                    4, // sjw max
+                    1, // brp min
+                    1024, //brp_max
+                    1, // brp increment;
+                };
+                return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
+            } else {
+                return true;
+            }
         }
     }
 
-    for(;;);
     return false;
 }
