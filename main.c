@@ -191,8 +191,6 @@ void mcp2515_set_mode(enum mcp2515_mode_t mode) {
 int main() {
     tusb_init();
 
-    stdio_init_all();
-
     for(size_t i = 0; i < sizeof(tx) / sizeof(*tx); i++) {
         tx[i].echo_id = -1;
     }
