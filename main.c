@@ -75,6 +75,14 @@ struct usb_control_out_t {
     uint16_t wLength;
 };
 
+enum mcp2515_mode_t {
+    MCP2515_MODE_NORMAL,
+    MCP2515_MODE_SLEEP,
+    MCP2515_MODE_LOOPBACK,
+    MCP2515_MODE_LISTENONLY,
+    MCP2515_MODE_CONFIG,
+};
+
 #define MCP2515_TX_BUFS 3
 
 const static uint16_t MCP2515_CMD_RESET = 0b11000000;
@@ -173,6 +181,13 @@ ssize_t mcp2515_get_free_tx() {
     return -1;
 }
 
+void mcp2515_set_mode(enum mcp2515_mode_t mode) {
+    mcp2515_write(MCP2515_CANCTRL, (mode << 5U));
+
+    // wait until mode is switched
+    while((mcp2515_read(MCP2515_CANSTAT) >> 5) != mode) {}
+}
+
 int main() {
     tusb_init();
 
@@ -195,10 +210,6 @@ int main() {
     mcp2515_reset();
     sleep_ms(250);
 
-    mcp2515_write(MCP2515_CNF1, 0x01);
-    mcp2515_write(MCP2515_CNF2, 0xb5);
-    mcp2515_write(MCP2515_CNF3, 0x01);
-
     // enable interrupts on rxs and txs
     mcp2515_write(MCP2515_CANINTE, 0b11111);
 
@@ -206,7 +217,7 @@ int main() {
     mcp2515_write(MCP2515_RXB0CTRL, MCP2515_RXB0CTRL_BUKT);
 
     // transition from config to normal mode
-    mcp2515_write(MCP2515_CANCTRL, 0x07 | (1 << 3));
+    //mcp2515_set_mode(MCP2515_MODE_SLEEP);
       
     for(;;) {
         if(mcp2515_isr_pending) {
@@ -289,8 +300,21 @@ bool usb_handle_control_out(uint8_t req) {
     if(req == GS_USB_BREQ_HOST_FORMAT) {
         return byte_order == 0xbeef;
     } else if(req == GS_USB_BREQ_MODE) {
+        mcp2515_set_mode(device_mode.mode ? MCP2515_MODE_NORMAL : MCP2515_MODE_SLEEP);
         return true;
     } else if(req == GS_USB_BREQ_BITTIMING) {
+        mcp2515_write(MCP2515_CNF1, 
+            (((device_bittiming.sjw - 1) & 0b11U) << 6U)
+            | ((device_bittiming.brp / 2 - 1) & 0b111111U)
+        );
+        mcp2515_write(MCP2515_CNF2, 
+            ((device_bittiming.prop_seg - 1) & 0b111U)
+            | (((device_bittiming.phase_seg1 - 1) & 0b111U) << 3)
+            | (1U << 7U)
+        );
+        mcp2515_write(MCP2515_CNF3, 
+            (((device_bittiming.phase_seg2 - 1) & 0b111U))
+        );
         return true;
     }
     return false;
@@ -331,15 +355,15 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, const tusb_contro
             if(stage == CONTROL_STAGE_SETUP) {
                 struct gs_device_bt_const res = {
                     0,
-                    8000000, // can timing base clock
-                    1, // tseg1 min
-                    16, // tseg1 max
-                    1, // tseg2 min
-                    8, // tseg2 max
-                    4, // sjw max
-                    1, // brp min
-                    1024, //brp_max
-                    1, // brp increment;
+                    8000000,
+                    // tseg1 1..8 (3 bits)
+                    1, 8,
+                    // tseg2 1..8 (3 bits)
+                    1, 8,
+                    // sjw 0..3 (2 bits)
+                    4,
+                    // brp 2..64 with increment of 2 (Tq = 2 * (BRP + 1) / Fosc)
+                    2, 64, 2
                 };
                 return tud_control_xfer(rhport, request, (void*) &res, sizeof(res));
             } else {
