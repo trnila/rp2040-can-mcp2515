@@ -277,8 +277,8 @@ int main() {
                 size_t hdr_size = 6;
                 uint8_t tx[hdr_size + sizeof(frame->data)];
                 tx[0] = 0b01000000 | (txn == 0 ? 0 : (1 << txn));
-                tx[1] = 0xFF; //SIDH
-                tx[2] = 0x00; //SIDL
+                tx[1] = frame->can_id >> 3U; // SIDH
+                tx[2] = (frame->can_id & 0b111) << 5U; //SIDL
                 tx[3] = 0x00; //EID8
                 tx[4] = 0x00; // IED0
                 tx[5] = frame->can_dlc; // DLC
