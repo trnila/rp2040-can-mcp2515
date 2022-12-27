@@ -105,6 +105,9 @@ const static uint16_t MCP2515_RXB0CTRL = 0x60;
 // Rollover enable bit (use RX1 if RX0 is full)
 const static uint8_t MCP2515_RXB0CTRL_BUKT = 1 << 2;
 
+const uint32_t CAN_STDMSGID_MAX = 0x7FF;
+const uint8_t SIDL_EXTENDED_MSGID = 1U << 3U;
+
 const static uint MCP2515_IRQ_GPIO = 20;
 
 volatile bool mcp2515_isr_pending = false;
@@ -240,7 +243,17 @@ int main() {
                     rxf.can_dlc = rx[5] & 0b1111;
                     rxf.flags = 0;
                     rxf.channel = 0;
-                    rxf.can_id = (rx[1] << 3) | (rx[2] >> 5);
+
+                    if(rx[2] & SIDL_EXTENDED_MSGID) {
+                        rxf.can_id = (rx[1] << 21U)
+                            | ((rx[2] >> 5U) << 18U)
+                            | ((rx[2] & 0b11) << 16U)
+                            | (rx[3] << 8U)
+                            | rx[4]
+                            | (1 << 31U); // extended frame, see linux/can.h
+                    } else {
+                        rxf.can_id = (rx[1] << 3U) | (rx[2] >> 5U);
+                    }
                     memcpy(rxf.data, &rx[6], rxf.can_dlc);
 
                     tud_vendor_write(&rxf, sizeof(rxf));
@@ -276,11 +289,23 @@ int main() {
 
                 size_t hdr_size = 6;
                 uint8_t tx[hdr_size + sizeof(frame->data)];
+                memset(tx, 0, sizeof(tx));
                 tx[0] = 0b01000000 | (txn == 0 ? 0 : (1 << txn));
-                tx[1] = frame->can_id >> 3U; // SIDH
-                tx[2] = (frame->can_id & 0b111) << 5U; //SIDL
-                tx[3] = 0x00; //EID8
-                tx[4] = 0x00; // IED0
+                if(frame->can_id <= CAN_STDMSGID_MAX) {
+                    tx[1] = frame->can_id >> 3U; // SIDH
+                    tx[2] = (frame->can_id & 0b111) << 5U; //SIDL
+                } else {
+                    // msgid 27..20
+                    tx[1] = frame->can_id >> 21U;
+                    // msgid 19..18, msgid 16,17, enable extended frame
+                    tx[2] = (((frame->can_id >> 18U) & 0b111U) << 5U)
+                            | ((frame->can_id >> 16U) & 0b11U)
+                            | (1U << 3U);
+                    // msgid 15..8
+                    tx[3] = frame->can_id >> 8U;
+                    // msgid 7..0
+                    tx[4] = frame->can_id;
+                }
                 tx[5] = frame->can_dlc; // DLC
                 memcpy(&tx[6], frame->data, frame->can_dlc);
 
