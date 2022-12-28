@@ -323,7 +323,7 @@ bool usb_handle_control_out(uint8_t req) {
     if(req == GS_USB_BREQ_HOST_FORMAT) {
         return byte_order == 0xbeef;
     } else if(req == GS_USB_BREQ_MODE) {
-        mcp2515_set_mode(device_mode.mode ? MCP2515_MODE_NORMAL : MCP2515_MODE_SLEEP);
+        mcp2515_set_mode(device_mode.mode ? MCP2515_MODE_NORMAL : MCP2515_MODE_CONFIG);
         return true;
     } else if(req == GS_USB_BREQ_BITTIMING) {
         mcp2515_write(MCP2515_CNF1, 
