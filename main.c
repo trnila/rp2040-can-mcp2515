@@ -83,12 +83,14 @@ enum mcp2515_mode_t {
     MCP2515_MODE_CONFIG,
 };
 
+#define MCP2515_RX_BUFS 2
 #define MCP2515_TX_BUFS 3
 
 const static uint16_t MCP2515_CMD_RESET = 0b11000000;
 const static uint16_t MCP2515_CMD_WRITE = 0b00000010;
 const static uint16_t MCP2515_CMD_READ  = 0b00000011;
 const static uint16_t MCP2515_CMD_BIT_MODIFY = 0b00000101;
+const static uint16_t MCP2515_CMD_READ_STATUS = 0b10100000;
 inline static uint16_t MCP2515_CMD_READ_RX_BUFFER(size_t n) {
     return  0b10010000 | ((n & 1U) << 2U);
 }
@@ -160,6 +162,16 @@ uint8_t mcp2515_read(uint8_t addr) {
     return rx[2];
 }
 
+uint8_t mcp2515_read_status() {
+    uint8_t tx[] = {
+        MCP2515_CMD_READ_STATUS,
+        0 /* dummy for response */
+    };
+    uint8_t rx[sizeof(tx)];
+    spi_transmit(tx, rx, sizeof(tx));
+    return rx[1];
+}
+
 void mcp2515_bit_modify(uint8_t reg, uint8_t mask, uint8_t val) {
     uint8_t tx[] = {MCP2515_CMD_BIT_MODIFY, reg, mask, val};
     spi_transmit(tx, NULL, sizeof(tx));
@@ -184,6 +196,36 @@ void mcp2515_set_mode(enum mcp2515_mode_t mode) {
 
     // wait until mode is switched
     while((mcp2515_read(MCP2515_CANSTAT) >> 5) != mode) {}
+}
+
+void handle_rx(uint8_t rxn) {
+    // read RXBnSIDH ... RXBnD0 ... RXBnD7
+    // and automatically clear pending RX
+    uint8_t tx[14] = {
+        MCP2515_CMD_READ_RX_BUFFER(rxn),
+    };
+    uint8_t rx[sizeof(tx)] = {0};
+    spi_transmit(tx, rx, sizeof(tx));
+
+    struct gs_host_frame rxf = {0};
+    rxf.echo_id = -1;
+    rxf.can_dlc = rx[5] & 0b1111;
+    rxf.flags = 0;
+    rxf.channel = 0;
+
+    if(rx[2] & SIDL_EXTENDED_MSGID) {
+        rxf.can_id = (rx[1] << 21U)
+            | ((rx[2] >> 5U) << 18U)
+            | ((rx[2] & 0b11) << 16U)
+            | (rx[3] << 8U)
+            | rx[4]
+            | (1 << 31U); // extended frame, see linux/can.h
+    } else {
+        rxf.can_id = (rx[1] << 3U) | (rx[2] >> 5U);
+    }
+    memcpy(rxf.data, &rx[6], rxf.can_dlc);
+
+    tud_vendor_write(&rxf, sizeof(rxf));
 }
 
 int main() {
@@ -217,53 +259,23 @@ int main() {
       
     for(;;) {
         while(gpio_get(MCP2515_IRQ_GPIO) == 0) {
-            struct gs_host_frame rxf;
-            uint8_t irqs = mcp2515_canstat_to_irqs(mcp2515_read(MCP2515_CANSTAT));
-
-            if((irqs & 0b110) == 0b110) {
-                uint8_t rxn = irqs & 0b001;
-                // read RXBnSIDH ... RXBnD0 ... RXBnD7 CANSTAT
-                // and automatically clear pending RX
-                uint8_t tx[15] = {
-                    MCP2515_CMD_READ_RX_BUFFER(rxn),
-                };
-                uint8_t rx[sizeof(tx)] = {0};
-                spi_transmit(tx, rx, sizeof(tx));
-                // update CANSTAT
-                irqs = mcp2515_canstat_to_irqs(rx[14]);
-
-                rxf.echo_id = -1;
-                rxf.can_dlc = rx[5] & 0b1111;
-                rxf.flags = 0;
-                rxf.channel = 0;
-
-                if(rx[2] & SIDL_EXTENDED_MSGID) {
-                    rxf.can_id = (rx[1] << 21U)
-                        | ((rx[2] >> 5U) << 18U)
-                        | ((rx[2] & 0b11) << 16U)
-                        | (rx[3] << 8U)
-                        | rx[4]
-                        | (1 << 31U); // extended frame, see linux/can.h
-                } else {
-                    rxf.can_id = (rx[1] << 3U) | (rx[2] >> 5U);
+            uint8_t status = mcp2515_read_status();
+            for(size_t rxn = 0; rxn < MCP2515_RX_BUFS; rxn++) {
+                if(status & (1 << rxn)) {
+                    handle_rx(rxn);
                 }
-                memcpy(rxf.data, &rx[6], rxf.can_dlc);
+            }
 
-                tud_vendor_write(&rxf, sizeof(rxf));
-            } else if(irqs >= 0b011 && irqs <= 0b101) {
-                size_t txn = irqs - 0b011;
-                assert(txn >= 0 && txn < MCP2515_TX_BUFS);
-                assert(tx[txn].echo_id != -1);
+            for(size_t txn = 0; txn < MCP2515_TX_BUFS; txn++) {
+                if(status & (1U << (3 + txn * 2))) {
+                    assert(tx[txn].echo_id != -1);
 
-                tud_vendor_write(&tx[txn], sizeof(tx[txn]));
-                tx[txn].echo_id = -1;
+                    tud_vendor_write(&tx[txn], sizeof(tx[txn]));
+                    tx[txn].echo_id = -1;
 
-                // ack irq
-                mcp2515_bit_modify(MCP2515_CANINTF, 1 << (2 + txn), 0);
-
-                irqs = mcp2515_canstat_to_irqs(mcp2515_read(MCP2515_CANSTAT));
-            } else {
-                for(;;);
+                    // ack irq
+                    mcp2515_bit_modify(MCP2515_CANINTF, 1 << (2 + txn), 0);
+                }
             }
         }
         
