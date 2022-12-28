@@ -90,7 +90,7 @@ const static uint16_t MCP2515_CMD_WRITE = 0b00000010;
 const static uint16_t MCP2515_CMD_READ  = 0b00000011;
 const static uint16_t MCP2515_CMD_BIT_MODIFY = 0b00000101;
 inline static uint16_t MCP2515_CMD_READ_RX_BUFFER(size_t n) {
-    return  0b10010000 | ((n & 1) << 1);
+    return  0b10010000 | ((n & 1U) << 2U);
 }
 
 const static uint16_t MCP2515_CANSTAT = 0x0E;
