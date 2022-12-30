@@ -2,6 +2,26 @@
 
 Raspberry Pico (RP2040) gs_usb compatible firmware interfacing CAN bus via cheap MCP2515 CAN controller.
 
+<img src="docs/box.jpg" height="250px">
+
+
+## Hardware
+- Raspberry Pico (RP2040)
+- MCP2515 CAN module
+
+CAN Transceiver TJA1050 on CAN module requires 5V, but Raspberry Pico is not 5V tolerant. So the path on the module should be cut off and 5V wire should be soldered directly on TJA1050 Pin 3 like on the following image:
+<img src="docs/module_fix.jpg" height="250px">
+
+| MCP2515 CAN module     | Raspberry Pico |
+|------------------------|----------------|
+| TJA1050 VCC 5V - Pin 3 | VBUS           |
+| VCC                    | 3v3 OUT        |
+| GND                    | GND            |
+| SS                     | GP17           |
+| SO                     | GP16           |
+| SI                     | GP19           |
+| SCK                    | GP18           |
+| INT                    | GP20           |
 
 ## Build
 1. install Raspberry Pico SDK
