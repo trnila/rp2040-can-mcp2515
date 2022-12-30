@@ -46,6 +46,7 @@ const uint32_t CAN_STDMSGID_MAX = 0x7FF;
 const uint8_t SIDL_EXTENDED_MSGID = 1U << 3U;
 
 const static uint MCP2515_IRQ_GPIO = 20;
+const static uint32_t MCP2515_OSC_FREQ = 8000000;
 
 volatile struct gs_host_frame tx[MCP2515_TX_BUFS];
 
@@ -317,7 +318,7 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, const tusb_contro
             if(stage == CONTROL_STAGE_SETUP) {
                 struct gs_device_bt_const res = {
                     0,
-                    8000000,
+                    MCP2515_OSC_FREQ,
                     // tseg1 1..8 (3 bits)
                     1, 8,
                     // tseg2 1..8 (3 bits)
