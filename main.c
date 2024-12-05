@@ -162,6 +162,7 @@ void handle_rx(uint8_t rxn) {
     memcpy(rxf.data, &rx[6], rxf.can_dlc);
 
     tud_vendor_write(&rxf, sizeof(rxf));
+    tud_vendor_write_flush();
 }
 
 int main() {
@@ -207,6 +208,7 @@ int main() {
                     assert(tx[txn].echo_id != -1);
 
                     tud_vendor_write(&tx[txn], sizeof(tx[txn]));
+                    tud_vendor_write_flush();
                     tx[txn].echo_id = -1;
 
                     // ack irq
