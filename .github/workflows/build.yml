@@ -1,0 +1,31 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: sudo apt update
+    - run: sudo apt install -y gcc-arm-none-eabi
+    - run: PICO_SDK_FETCH_FROM_GIT=1 cmake -S . -B build
+    - run: cmake --build build --parallel $(nproc)
+    - uses: actions/upload-artifact@v4.3.1
+      with:
+        name: gs_usb_fw
+        path: build/*.uf2
+    - uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: build/*.uf2
+
+  precommit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v2
+    - run: pip install pre-commit
+    - run: pre-commit run --show-diff-on-failure --color=always --all-files
