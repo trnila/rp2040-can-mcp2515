@@ -2,14 +2,18 @@
 
 Raspberry Pico (RP2040) gs_usb compatible firmware interfacing CAN bus via cheap MCP2515 CAN controller.
 
-<img src="docs/box.jpg" height="250px">
 
 
 ## Hardware
-- Raspberry Pico (RP2040)
-- MCP2515 CAN module
+### [Adafruit RP2040 CAN Bus Feather](https://www.adafruit.com/product/5724)
+<img src="docs/adafruit_can_feather.jpg" height=250px>
+
+
+### Raspberry Pico with MCP2515 CAN module
+<img src="docs/box.jpg" height="250px">
 
 CAN Transceiver TJA1050 on CAN module requires 5V, but Raspberry Pico is not 5V tolerant. So the path on the module should be cut off and 5V wire should be soldered directly on TJA1050 Pin 3 like on the following image:
+
 <img src="docs/module_fix.jpg" height="250px">
 
 | MCP2515 CAN module     | Raspberry Pico |
@@ -37,14 +41,14 @@ $ make -j$(nproc)
 ```
 
 ## Flash
-You can easily flash RP2040 by pressing BOOTSEL button and copying `rp2040-can-mcp2515.uf2` to connected USB Mass storage provided by RP2040 BOOT ROM:
-```
-$ sudo mount /dev/sdX1 /mnt
-$ sudo cp rp2040-can-mcp2515.uf2 /mnt
-$ sudo sync
-```
+Enter flashing bootloader via:
+1) Keep `BOOTSEL` button pressed
+2) Reset the board with button or re-plugging power
+3) Release `BOOTSEL` button
 
-Alternative firmware can be loaded with SWD interface.
+Load the firmware via `picotool load gs_usb_ADAFRUIT_CAN_FEATHER.uf2` command or by copying that file into connected USB mass storage provided by RP2040 BOOT ROM.
+Reset the board afterwards.
+
 
 ## Use
 You should see `can0` interface once the device is connected to USB.

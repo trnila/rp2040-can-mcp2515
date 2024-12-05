@@ -4,6 +4,30 @@
 #include "tusb.h"
 #include "gs_usb.h"
 
+#if defined(BOARD_PICO_MCP2515_MODULE_20MHZ) || defined(BOARD_PICO_MCP2515_MODULE_8MHZ)
+#if defined(BOARD_PICO_MCP2515_MODULE_20MHZ)
+const static uint32_t MCP2515_OSC_FREQ = 20000000;
+#else
+const static uint32_t MCP2515_OSC_FREQ = 8000000;
+#endif
+const static uint MCP2515_IRQ_GPIO = 20;
+const static spi_inst_t* MCP2515_SPI = spi_default;
+const static uint MCP2515_SPI_CSN_GPIO = PICO_DEFAULT_SPI_CSN_PIN;
+const static uint MCP2515_SPI_RX_GPIO = PICO_DEFAULT_SPI_RX_PIN;
+const static uint MCP2515_SPI_SCK_GPIO = PICO_DEFAULT_SPI_SCK_PIN;
+const static uint MCP2515_SPI_TX_GPIO = PICO_DEFAULT_SPI_TX_PIN;
+#elif defined(BOARD_ADAFRUIT_CAN_FEATHER)
+const static uint32_t MCP2515_OSC_FREQ = 16000000;
+const static uint MCP2515_IRQ_GPIO = 22;
+const static spi_inst_t* MCP2515_SPI = spi1;
+const static uint MCP2515_SPI_CSN_GPIO = 19;
+const static uint MCP2515_SPI_RX_GPIO = 8;
+const static uint MCP2515_SPI_SCK_GPIO = 14;
+const static uint MCP2515_SPI_TX_GPIO = 15;
+#else
+#error Invalid board selected
+#endif
+
 struct usb_control_out_t {
     uint8_t bRequest;
     void *buffer;
@@ -45,8 +69,6 @@ const static uint8_t MCP2515_RXB0CTRL_BUKT = 1 << 2;
 const uint32_t CAN_STDMSGID_MAX = 0x7FF;
 const uint8_t SIDL_EXTENDED_MSGID = 1U << 3U;
 
-const static uint MCP2515_IRQ_GPIO = 20;
-const static uint32_t MCP2515_OSC_FREQ = 8000000;
 
 volatile struct gs_host_frame tx[MCP2515_TX_BUFS];
 
@@ -61,15 +83,15 @@ struct usb_control_out_t usb_control_out[] = {
 
 void spi_transmit(uint8_t *tx, uint8_t* rx, size_t len) {
     asm volatile("nop \n nop \n nop");
-    gpio_put(PICO_DEFAULT_SPI_CSN_PIN, 0);
+    gpio_put(MCP2515_SPI_CSN_GPIO, 0);
     asm volatile("nop \n nop \n nop");
     if(rx) {
-        spi_write_read_blocking(spi_default, tx, rx, len);
+        spi_write_read_blocking(MCP2515_SPI, tx, rx, len);
     } else {
-        spi_write_blocking(spi_default, tx, len);
+        spi_write_blocking(MCP2515_SPI, tx, len);
     }
     asm volatile("nop \n nop \n nop");
-    gpio_put(PICO_DEFAULT_SPI_CSN_PIN, 1);
+    gpio_put(MCP2515_SPI_CSN_GPIO, 1);
     asm volatile("nop \n nop \n nop");
 }
 
@@ -172,12 +194,12 @@ int main() {
         tx[i].echo_id = -1;
     }
 
-    spi_init(spi_default, 1000 * 1000);
-    gpio_set_function(PICO_DEFAULT_SPI_RX_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(PICO_DEFAULT_SPI_SCK_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(PICO_DEFAULT_SPI_TX_PIN, GPIO_FUNC_SPI);
-    gpio_init(PICO_DEFAULT_SPI_CSN_PIN);
-    gpio_set_dir(PICO_DEFAULT_SPI_CSN_PIN, GPIO_OUT);
+    spi_init(MCP2515_SPI, 1000 * 1000);
+    gpio_set_function(MCP2515_SPI_RX_GPIO, GPIO_FUNC_SPI);
+    gpio_set_function(MCP2515_SPI_SCK_GPIO, GPIO_FUNC_SPI);
+    gpio_set_function(MCP2515_SPI_TX_GPIO, GPIO_FUNC_SPI);
+    gpio_init(MCP2515_SPI_CSN_GPIO);
+    gpio_set_dir(MCP2515_SPI_CSN_GPIO, GPIO_OUT);
 
     gpio_init(MCP2515_IRQ_GPIO);
     gpio_pull_up(MCP2515_IRQ_GPIO);

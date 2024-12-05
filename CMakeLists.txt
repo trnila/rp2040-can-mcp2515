@@ -6,10 +6,17 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_executable(rp2040-can-mcp2515
-  main.c
-  usb_descriptors.c
-)
-target_include_directories(rp2040-can-mcp2515 PRIVATE .)
-target_link_libraries(rp2040-can-mcp2515 pico_stdlib hardware_spi tinyusb_device tinyusb_board)
-pico_add_extra_outputs(rp2040-can-mcp2515)
+function(add_board BOARD)
+  add_executable(gs_usb_${BOARD}
+    main.c
+    usb_descriptors.c
+  )
+  target_include_directories(gs_usb_${BOARD} PRIVATE .)
+  target_link_libraries(gs_usb_${BOARD} pico_stdlib hardware_spi tinyusb_device tinyusb_board)
+  target_compile_definitions(gs_usb_${BOARD} PRIVATE -DBOARD_${BOARD})
+  pico_add_extra_outputs(gs_usb_${BOARD})
+endfunction()
+
+add_board(PICO_MCP2515_MODULE_8MHZ)
+add_board(PICO_MCP2515_MODULE_20MHZ)
+add_board(ADAFRUIT_CAN_FEATHER)
