@@ -98,11 +98,9 @@ $ RP2040_IFACE=mycan TEST_IFACE=othercan pytest
 ```
 
 ### Stress testing
-Fully utilizes CAN bus by spamming randomly generated messages in a loop. All messages are also verified on receiver side. 
+Fully utilizes CAN bus by spamming randomly generated messages in a loop. All messages are also verified on receiver side.
 ```sh
 $ make tests/stress
 $ ./tests/stress mycan othercan
 $ ./tests/stress othercan mycan
 ```
-
-

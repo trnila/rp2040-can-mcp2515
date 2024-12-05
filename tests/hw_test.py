@@ -70,5 +70,3 @@ def test_bitrates(rp2040_sender, bitrate):
     received = rx.recv(1)
     assert received.arbitration_id == 0x345
     assert list(received.data) == [1, 2, 3, 4, 5, 6, 7, 8]
-
-
