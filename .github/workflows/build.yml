@@ -13,6 +13,7 @@ jobs:
     - run: sudo apt install -y gcc-arm-none-eabi
     - run: PICO_SDK_FETCH_FROM_GIT=1 cmake -S . -B build
     - run: cmake --build build --parallel $(nproc)
+    - run: make tests/stress
     - uses: actions/upload-artifact@v4.3.1
       with:
         name: gs_usb_fw
