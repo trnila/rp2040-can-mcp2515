@@ -68,7 +68,7 @@ $ sudo ip link set can0 up
 You can receive and send messages with `can-utils` package:
 ```sh
 $ candump can0
-$ cansend can0 123@DEADBEEF
+$ cansend can0 123#DEADBEEF
 ```
 
 Use following udev rule for more predictable interface name and reload with `udevadm control --reload-rules`:
