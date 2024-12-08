@@ -44,6 +44,7 @@ enum mcp2515_mode_t {
   MCP2515_MODE_CONFIG,
 };
 
+#define MCP2515_SPI_FREQ (10 * 1000 * 1000)
 #define MCP2515_RX_BUFS 2
 #define MCP2515_TX_BUFS 3
 #define RX_FRAMES_QUEUE_LEN 1024
@@ -189,7 +190,7 @@ int main() {
 
   queue_init(&rx_frames, sizeof(struct gs_host_frame), RX_FRAMES_QUEUE_LEN);
 
-  spi_init(MCP2515_SPI, 1000 * 1000);
+  spi_init(MCP2515_SPI, MCP2515_SPI_FREQ);
   gpio_set_function(MCP2515_SPI_RX_GPIO, GPIO_FUNC_SPI);
   gpio_set_function(MCP2515_SPI_SCK_GPIO, GPIO_FUNC_SPI);
   gpio_set_function(MCP2515_SPI_TX_GPIO, GPIO_FUNC_SPI);
