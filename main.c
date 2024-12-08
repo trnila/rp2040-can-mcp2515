@@ -12,7 +12,7 @@ const static uint32_t MCP2515_OSC_FREQ = 20000000;
 const static uint32_t MCP2515_OSC_FREQ = 8000000;
 #endif
 const static uint MCP2515_IRQ_GPIO = 20;
-const static spi_inst_t *MCP2515_SPI = spi_default;
+static spi_inst_t *MCP2515_SPI = spi_default;
 const static uint MCP2515_SPI_CSN_GPIO = PICO_DEFAULT_SPI_CSN_PIN;
 const static uint MCP2515_SPI_RX_GPIO = PICO_DEFAULT_SPI_RX_PIN;
 const static uint MCP2515_SPI_SCK_GPIO = PICO_DEFAULT_SPI_SCK_PIN;
@@ -20,7 +20,7 @@ const static uint MCP2515_SPI_TX_GPIO = PICO_DEFAULT_SPI_TX_PIN;
 #elif defined(BOARD_ADAFRUIT_CAN_FEATHER)
 const static uint32_t MCP2515_OSC_FREQ = 16000000;
 const static uint MCP2515_IRQ_GPIO = 22;
-const static spi_inst_t *MCP2515_SPI = spi1;
+static spi_inst_t *MCP2515_SPI = spi1;
 const static uint MCP2515_SPI_CSN_GPIO = 19;
 const static uint MCP2515_SPI_RX_GPIO = 8;
 const static uint MCP2515_SPI_SCK_GPIO = 14;
@@ -70,7 +70,7 @@ const static uint8_t MCP2515_RXB0CTRL_BUKT = 1 << 2;
 const uint32_t CAN_STDMSGID_MAX = 0x7FF;
 const uint8_t SIDL_EXTENDED_MSGID = 1U << 3U;
 
-volatile struct gs_host_frame tx[MCP2515_TX_BUFS];
+struct gs_host_frame tx[MCP2515_TX_BUFS];
 
 static uint32_t byte_order = 0;
 static struct gs_device_bittiming device_bittiming;
