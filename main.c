@@ -250,10 +250,7 @@ int main() {
       if (txn >= 0) {
         struct gs_host_frame *frame = &tx[txn];
         uint32_t count = tud_vendor_read(frame, sizeof(*frame));
-        if (count != sizeof(*frame)) {
-          for (;;)
-            ;
-        }
+        assert(count == sizeof(*frame));
 
         size_t hdr_size = 6;
         uint8_t tx[hdr_size + sizeof(frame->data)];
