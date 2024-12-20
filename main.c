@@ -46,7 +46,8 @@ enum mcp2515_mode_t {
 
 #define MCP2515_SPI_FREQ (10 * 1000 * 1000)
 #define MCP2515_RX_BUFS 2
-#define MCP2515_TX_BUFS 3
+/* multiple TX buffers are not sending frames in FIFO order */
+#define MCP2515_TX_BUFS 1
 #define RX_FRAMES_QUEUE_LEN 1024
 
 const static uint16_t MCP2515_CMD_RESET = 0b11000000;
