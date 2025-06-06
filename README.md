@@ -30,7 +30,7 @@ CAN Transceiver TJA1050 on CAN module requires 5V, but Raspberry Pico is not 5V 
 1 Mbit bitrate can be enabled by replacing CAN module crystal with 20 Mhz one and changing `MCP2515_OSC_FREQ` variable.
 
 ## Build
-1. install Raspberry Pico SDK
+1. install Raspberry Pico SDK (Version 2.1.0)
 2. make sure environment variable `PICO_SDK_PATH` points to installed SDK
 
 ```sh
